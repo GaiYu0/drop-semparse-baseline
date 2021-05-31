@@ -14,15 +14,16 @@ import spacy
 from spacy.tokens import Span, Doc
 from allennlp.models.model import Model
 from allennlp.common.util import JsonDict
-from allennlp.pretrained import (srl_with_elmo_luheng_2018,
-                                 open_information_extraction_stanovsky_2018,
-                                 biaffine_parser_stanford_dependencies_todzat_2017,
-                                 neural_coreference_resolution_lee_2017)
+# from allennlp.pretrained import (srl_with_elmo_luheng_2018,
+#                                  open_information_extraction_stanovsky_2018,
+#                                  biaffine_parser_stanford_dependencies_todzat_2017,
+#                                  neural_coreference_resolution_lee_2017)
+from allennlp_models import pretrained
 
 
 LOGGER = logging.getLogger(__name__)
 
-SPACY_NLP = spacy.load('en')
+SPACY_NLP = spacy.load('en_core_web_sm')
 
 def format_single_verb(nx_graph, words, verb_ind):
     """
@@ -98,7 +99,7 @@ def get_table_info(processed_passage: Doc,
     column_names = ['sentence_id', 'verb']
     for sentence_id, spacy_sentence in enumerate(processed_passage.sents):
         processed_sentences.append(spacy_sentence)
-        pas_info = tagger(spacy_sentence.string.strip())
+        pas_info = tagger(spacy_sentence.text.strip())
         for verb_info in pas_info['verbs']:
             tag_span_indices = {}
             prev_tag_type = None
@@ -157,11 +158,11 @@ def get_tagged_info(table_info: List[Dict[str, Span]],
         other_entities_in_sentence = []
         for entity in entities_in_sentence:
             if entity.label_ == 'CARDINAL':
-                numbers_in_sentence.append(entity.string)
+                numbers_in_sentence.append(entity.text)
             elif entity.label_ == 'DATE':
-                dates_in_sentence.append(entity.string)
+                dates_in_sentence.append(entity.text)
             else:
-                other_entities_in_sentence.append(entity.string)
+                other_entities_in_sentence.append(entity.text)
         tagged_row_info: Dict[str, Dict[str]] = {}
         for relation_name, argument in row_info.items():
             if relation_name == 'sentence_id':
@@ -169,7 +170,7 @@ def get_tagged_info(table_info: List[Dict[str, Span]],
                 tagged_row_info[relation_name] = argument
             elif relation_name == 'verb':
                 # We're only extracting the lemma here.
-                tagged_row_info[relation_name] = {"string": argument.string.strip(),
+                tagged_row_info[relation_name] = {"string": argument.text.strip(),
                                                   "lemmas": [token.lemma_ for token in argument]}
             else:
                 # We're assuming that any number, date, or entity that matches a substring in this
@@ -180,7 +181,7 @@ def get_tagged_info(table_info: List[Dict[str, Span]],
                 dates_in_argument = []
                 entities_in_argument = []
                 for entity in argument.ents:
-                    entity_text = entity.string.strip()
+                    entity_text = entity.text.strip()
                     if entity.label_ == "CARDINAL":
                         numbers_in_argument.append(entity_text)
                     elif entity.label_ == "DATE":
@@ -206,9 +207,9 @@ def get_tagged_info(table_info: List[Dict[str, Span]],
                                         token_in_cluster = True
                                         break
                                 if token_in_cluster and cluster_head is not None:
-                                    entities_in_argument.insert(0, cluster_head.string.strip())
+                                    entities_in_argument.insert(0, cluster_head.text.strip())
 
-                tagged_row_info[relation_name] = {"argument_string": argument.string.strip(),
+                tagged_row_info[relation_name] = {"argument_string": argument.text.strip(),
                                                   'argument_lemmas': [token.lemma_ for token in
                                                                       argument],
                                                   "numbers": numbers_in_argument,
@@ -249,7 +250,7 @@ def make_files_for_semparse(data_files_path: str,
                     coref_spans[-1].append(processed_doc[span_begin:span_end + 1])
         table_info, column_names, processed_sentences = get_table_info(processed_doc, tagger)
         tagged_info = get_tagged_info(table_info, processed_sentences, coref_spans)
-        sentences = [spacy_sentence.string.strip() for spacy_sentence in processed_sentences]
+        sentences = [spacy_sentence.text.strip() for spacy_sentence in processed_sentences]
         table_file = f"{tables_path}/{paragraph_id}.table"
         LOGGER.info(f"Writing {table_file}..")
         with open(table_file, "w") as output_file:
@@ -259,7 +260,7 @@ def make_files_for_semparse(data_files_path: str,
                 for column_name in column_names:
                     if column_name in row_info:
                         if isinstance(row_info[column_name], Span):
-                            column_info = row_info[column_name].string.strip()
+                            column_info = row_info[column_name].text.strip()
                         else:
                             column_info = row_info[column_name]
                         row_info_to_print.append(column_info)
@@ -325,18 +326,23 @@ def make_files_for_semparse(data_files_path: str,
 
 def main(args):
     if args.tagger == "srl":
-        model = srl_with_elmo_luheng_2018()
+        # model = srl_with_elmo_luheng_2018()
+        model = pretrained.load_predictor('structured-prediction-srl')
         tagger_function = model.predict
+        raise NotImplementedError()
     elif args.tagger == "oie":
-        model = open_information_extraction_stanovsky_2018()
+        # model = open_information_extraction_stanovsky_2018()
+        model = pretrained.load_predictor('structured-prediction-srl')
         tagger_function = lambda sentence: model.predict_json({"sentence": sentence})
     elif args.tagger == "dep":
-        model = biaffine_parser_stanford_dependencies_todzat_2017()
+        # model = biaffine_parser_stanford_dependencies_todzat_2017()
+        model = pretrained.load_predictor('structured-prediction-biaffine-parser')
         tagger_function = lambda sentence: get_verb_info_from_graph(get_nx_graph_from_dep(model.predict(sentence)))
     else:
         raise RuntimeError(f"Unknown tagger type: {args.tagger}")
     if args.include_coref:
-        coref_model = neural_coreference_resolution_lee_2017()
+        # coref_model = neural_coreference_resolution_lee_2017()
+        coref_model = pretrained.load_predictor('coref-spanbert')
     else:
         coref_model = None
     if args.verbose:
